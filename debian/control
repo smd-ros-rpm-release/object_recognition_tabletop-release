@@ -1,13 +1,13 @@
-Source: ros-fuerte-object-recognition-tabletop
+Source: ros-groovy-object-recognition-tabletop
 Section: misc
 Priority: extra
 Maintainer: Vincent Rabaud <vrabaud@willowgarage.com>
-Build-Depends: debhelper (>= 7.0.50~), ros-fuerte-moveit-msgs,ros-fuerte-object-recognition-msgs,ros-fuerte-ecto-pcl,ros-fuerte-object-recognition-core,ros-fuerte-ecto,ros-fuerte-catkin
+Build-Depends: debhelper (>= 7.0.50~), ros-groovy-ecto,ros-groovy-catkin,ros-groovy-ecto-pcl,ros-groovy-object-recognition-msgs,ros-groovy-object-recognition-core,ros-groovy-moveit-msgs
 Homepage: http://ecto.willowgarage.com
 Standards-Version: 3.9.2
 
-Package: ros-fuerte-object-recognition-tabletop
+Package: ros-groovy-object-recognition-tabletop
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, ros-fuerte-object-recognition-msgs,ros-fuerte-ecto-pcl,ros-fuerte-object-recognition-core,ros-fuerte-ecto
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-groovy-ecto,ros-groovy-object-recognition-msgs,ros-groovy-ecto-pcl,ros-groovy-object-recognition-core
 Description: A port of the old tabletop object recognition
 
