@@ -1,8 +1,19 @@
+if (ROS_GROOVY_FOUND)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/__init__.py.plain.in
-               ${ecto_module_PYTHON_OUTPUT}/__init__.py
+               ${CATKIN_BUILD_PREFIX}/${CATKIN_PROJECT_PYTHON_DESTINATION}/ecto_cells/__init__.py
                @ONLY
 )
 
-install(FILES ${ecto_module_PYTHON_OUTPUT}/__init__.py
-        DESTINATION ${PYTHON_PACKAGES_PATH}/tabletop/ecto_cells
+install(FILES ${CATKIN_BUILD_PREFIX}/${CATKIN_PROJECT_PYTHON_DESTINATION}/ecto_cells/__init__.py
+        DESTINATION ${CATKIN_PROJECT_PYTHON_DESTINATION}/ecto_cells/__init__.py
 )
+else()
+configure_file(__init__.py.plain.in
+               ${ECTO_PYTHON_BUILD_PATH}/${PROJECT_NAME}/ecto_cells/__init__.py
+               @ONLY
+)
+
+install(FILES ${ECTO_PYTHON_BUILD_PATH}/${PROJECT_NAME}/ecto_cells/__init__.py
+        DESTINATION ${ECTO_PYTHON_INSTALL_PATH}/${PROJECT_NAME}/ecto_cells
+)
+endif()
