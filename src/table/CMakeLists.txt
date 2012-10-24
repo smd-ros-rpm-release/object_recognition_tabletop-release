@@ -5,23 +5,12 @@ if (genmsg_FOUND)
   SET(TABLETOP_ROS_CELLS TableMsgAssembler.cpp TableVisualizationMsgAssembler.cpp)
 endif()
 
-find_package(object_recognition_core REQUIRED)
-find_package(object_recognition_msgs REQUIRED)
-
 find_package(OpenCV REQUIRED)
 
 find_pcl_package()
-if (ROS_ELECTRIC_FOUND)
-    include_directories(SYSTEM
-                        /opt/ros/electric/stacks/arm_navigation_experimental/distance_field/include/
-                        /opt/ros/electric/stacks/arm_navigation/arm_navigation_msgs/msg_gen/cpp/include/
-                        /opt/ros/electric/stacks/object_manipulation/household_objects_database_msgs/msg_gen/cpp/include/
-                        /opt/ros/electric/stacks/object_manipulation/household_objects_database_msgs/srv_gen/cpp/include/
-                        /opt/ros/electric/stacks/object_manipulation/household_objects_database/include/
-                        /opt/ros/electric/stacks/sql_database/database_interface/include/)
-    find_library(household_objects_database_LIBRARIES household_objects_database /opt/ros/electric/stacks/object_manipulation/household_objects_database/lib)
-    find_library(tf_LIBRARIES tf /opt/ros/electric/stacks/geometry/tf/lib/)
-else()
+if (ROS_FUERTE_FOUND)
+find_package(object_recognition_core REQUIRED)
+find_package(object_recognition_msgs REQUIRED)
     include_directories(SYSTEM
                         /opt/ros/fuerte/stacks/arm_navigation_experimental/distance_field/include/
                         /opt/ros/fuerte/stacks/arm_navigation/arm_navigation_msgs/msg_gen/cpp/include/
@@ -36,6 +25,18 @@ else()
     )
     find_library(household_objects_database_LIBRARIES household_objects_database /opt/ros/fuerte/stacks/object_manipulation/household_objects_database/lib)
     find_library(tf_LIBRARIES tf /opt/ros/fuerte/stacks/geometry/tf/lib/)
+else()
+find_package(catkin REQUIRED object_recognition_core object_recognition_msgs tf)
+    include_directories(SYSTEM
+                        /opt/ros/fuerte/stacks/arm_navigation_experimental/distance_field/include/
+                        /opt/ros/fuerte/stacks/arm_navigation/arm_navigation_msgs/msg_gen/cpp/include/
+                        /opt/ros/fuerte/stacks/bullet/include/
+                        /opt/ros/fuerte/stacks/object_manipulation/household_objects_database_msgs/msg_gen/cpp/include/
+                        /opt/ros/fuerte/stacks/object_manipulation/household_objects_database_msgs/srv_gen/cpp/include/
+                        /opt/ros/fuerte/stacks/object_manipulation/household_objects_database/include/
+                        /opt/ros/fuerte/stacks/sql_database/database_interface/include/
+    )
+    find_library(household_objects_database_LIBRARIES household_objects_database /opt/ros/fuerte/stacks/object_manipulation/household_objects_database/lib)
 endif()
 
 
@@ -53,8 +54,8 @@ add_definitions(-DPCL_VERSION_GE_160=1)
 # deal with the detection TOD module
 ectomodule(tabletop_table DESTINATION ${PROJECT_NAME}/ecto_cells
                           INSTALL
-  module.cpp
   Clusterer.cpp
+  module.cpp
   TableDetector.cpp
   TablePose.cpp
   tabletop_segmenter.cpp
