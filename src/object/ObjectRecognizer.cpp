@@ -44,11 +44,7 @@
 #include <ecto/ecto.hpp>
 #include <Eigen/StdVector>
 #include <Eigen/Geometry>
-#ifdef PCL_VERSION_GE_140
 #include <pcl/common/transforms.h>
-#else
-#include <pcl/registration/transforms.h>
-#endif
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
@@ -56,11 +52,11 @@
 #include <tf/transform_broadcaster.h>
 
 #include <household_objects_database/objects_database.h>
-#include <tabletop/table/tabletop_segmenter.h>
 #include <tabletop/object/tabletop_object_detector.h>
 
 #include <object_recognition_core/common/pose_result.h>
 #include <object_recognition_core/common/types.h>
+#include <object_recognition_msgs/shape_conversion.h>
 
 using object_recognition_core::common::PoseResult;
 
@@ -83,9 +79,10 @@ namespace tabletop
 
       object_recognizer_ = tabletop_object_detector::TabletopObjectRecognizer();
 
+      object_recognition_core::db::ObjectDbParameters parameters = (*db_)->parameters();
       household_objects_database::ObjectsDatabase *database = new household_objects_database::ObjectsDatabase(
-          db_->parameters().at("host").get_str(), db_->parameters().at("port").get_str(), db_->parameters().at("user").get_str(),
-          db_->parameters().at("password").get_str(), db_->parameters().at("name").get_str());
+          parameters.at("host").get_str(), parameters.at("port").get_str(), parameters.at("user").get_str(),
+          parameters.at("password").get_str(), parameters.at("name").get_str());
 
       std::vector<boost::shared_ptr<household_objects_database::DatabaseScaledModel> > models;
       if (!database->getScaledModelsBySet(models, model_set))
@@ -100,7 +97,7 @@ namespace tabletop
         if (!database->getScaledModelMesh(model_id, mesh))
           continue;
 
-        object_recognizer_.addObject(model_id, mesh);
+        object_recognizer_.addObject(model_id, an_shape_to_mesh(mesh));
       }
     }
 
@@ -131,7 +128,7 @@ namespace tabletop
       object_ids_.dirty(true);
 
       perform_fit_merge_ = true;
-      confidence_cutoff_ = 0.01;
+      confidence_cutoff_ = 0.01f;
     }
 
     /** Compute the pose of the table plane
@@ -146,6 +143,11 @@ namespace tabletop
 
       // Process each table
       pose_results_->clear();
+
+      std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> clusters_merged;
+      // Map to store the transformation for each cluster (table_index)
+      std::map<pcl::PointCloud<pcl::PointXYZ>::Ptr, size_t> cluster_table;
+
       for (size_t table_index = 0; table_index < clusters_->size(); ++table_index)
       {
         Eigen::Quaternionf quat((*table_rotations_)[table_index]);
@@ -154,20 +156,25 @@ namespace tabletop
         size_t n_clusters = (*clusters_)[table_index].size();
         std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> clusters(n_clusters);
 
-        for (size_t cluster_index = 0; cluster_index < n_clusters; ++cluster_index)
-        {
-          Eigen::Matrix4f t;
-          t.block(0, 0, 3, 3) = (*table_rotations_)[table_index].transpose();
-          t.block(0, 3, 3, 1) = -(*table_rotations_)[table_index].transpose() * (*table_translations_)[table_index];
+		Eigen::Matrix4f t;
+		t.block(0, 0, 3, 3) = (*table_rotations_)[table_index].transpose();
+		t.block(0, 3, 3, 1) = -(*table_rotations_)[table_index].transpose() * (*table_translations_)[table_index];
 
-          clusters[cluster_index] = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
-          pcl::transformPointCloud(*((*clusters_)[table_index][cluster_index]), *(clusters[cluster_index]), t);
-        }
-        object_recognizer_.objectDetection<pcl::PointXYZ>(clusters, confidence_cutoff_, perform_fit_merge_, results);
+		for (size_t cluster_index = 0; cluster_index < n_clusters; ++cluster_index)
+		{
+		  clusters[cluster_index] = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
+		  pcl::transformPointCloud(*((*clusters_)[table_index][cluster_index]), *(clusters[cluster_index]), t);
+		  cluster_table.insert(std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, size_t>(clusters[cluster_index], table_index));
+		}
+
+		clusters_merged.insert(clusters_merged.end(), clusters.begin(), clusters.end());
+      }
+        object_recognizer_.objectDetection<pcl::PointXYZ>(clusters_merged, confidence_cutoff_, perform_fit_merge_, results);
 
         for (size_t i = 0; i < results.size(); ++i)
         {
           const tabletop_object_detector::TabletopObjectRecognizer::TabletopResult<pcl::PointXYZ> & result = results[i];
+          const size_t table_index = cluster_table[result.cloud_];
 
           PoseResult pose_result;
 
@@ -190,6 +197,12 @@ namespace tabletop
           pose_result.set_confidence(result.confidence_);
 
           // Add the cluster of points
+          std::vector<sensor_msgs::PointCloud2ConstPtr> ros_clouds (1);
+          sensor_msgs::PointCloud2Ptr cluster_cloud (new sensor_msgs::PointCloud2());
+	      pcl::toROSMsg(*result.cloud_, *cluster_cloud);
+	      ros_clouds[0] = cluster_cloud;
+	      pose_result.set_clouds(ros_clouds);
+
           /*
           typedef std::vector<pcl::PointCloud<pcl::PointXYZ>, Eigen::aligned_allocator<pcl::PointCloud<pcl::PointXYZ> > > CloudVec;          
           CloudVec point_clouds(1);
@@ -200,7 +213,7 @@ namespace tabletop
           */
 
           pose_results_->push_back(pose_result);
-        }
+//        }
       }
 
       return ecto::OK;
@@ -211,16 +224,17 @@ namespace tabletop
     tabletop_object_detector::TabletopObjectRecognizer object_recognizer_;
     /** The resulting poses of the objects */
     ecto::spore<std::vector<PoseResult> > pose_results_;
+    /** The input clusters */
     ecto::spore<std::vector<std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> > > clusters_;
     /** The rotations of the tables */
     ecto::spore<std::vector<Eigen::Matrix3f> > table_rotations_;
     /** The translations of the tables */
     ecto::spore<std::vector<Eigen::Vector3f> > table_translations_;
     /** The number of models to fit to each cluster */
-    int confidence_cutoff_;
+    float confidence_cutoff_;
     bool perform_fit_merge_;
     ecto::spore<std::string> object_ids_;
-    ecto::spore<object_recognition_core::db::ObjectDb> db_;
+    ecto::spore<object_recognition_core::db::ObjectDbPtr> db_;
   };
 }
 
