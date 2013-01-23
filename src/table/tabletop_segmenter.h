@@ -1,7 +1,7 @@
 /*
  * Software License Agreement (BSD License)
  *
- *  Copyright (c) 2009, Willow Garage, Inc.
+ *  Copyright (c) 2011, Willow Garage, Inc.
  *  All rights reserved.
  *
  *  Redistribution and use in source and binary forms, with or without
@@ -33,33 +33,20 @@
  *
  */
 
-#ifndef DB_TRANSPARENT_OBJECTS_HPP_
-#define DB_TRANSPARENT_OBJECTS_HPP_
+#ifndef TABLETOP_SEGMENTER_H_
+#define TABLETOP_SEGMENTER_H_
 
-#include <object_recognition_core/db/db.h>
+#include <opencv2/core/core.hpp>
 
-#include <shape_msgs/Mesh.h>
-
-namespace object_recognition_core
+namespace tabletop
 {
-  namespace db
-  {
-    // Specializations for cv::FileNode
-    template<>
-    void
-    object_recognition_core::db::Document::get_attachment<shape_msgs::Mesh>(
-        const AttachmentName &attachment_name, shape_msgs::Mesh &value) const;
-
-    template<>
-    void
-    object_recognition_core::db::Document::get_attachment_and_cache<shape_msgs::Mesh>(
-        const AttachmentName &attachment_name, shape_msgs::Mesh &value);
-
-    template<>
-    void
-    object_recognition_core::db::Document::set_attachment<shape_msgs::Mesh>(
-        const AttachmentName &attachment_name, const shape_msgs::Mesh &value);
-  }
+  /** Assumes plane coefficients are of the form ax+by+cz+d=0, normalized
+   * @param plane_coefficients
+   * @param up_direction_in
+   * @param flatten_plane if true, the plane coefficients are modified so that up_direction_in is the normal
+   */
+  void
+  getPlaneTransform(const cv::Vec4f &plane_coefficients, cv::Vec3f & translation, cv::Matx33f & rotation);
 }
 
-#endif
+#endif /* TABLETOP_SEGMENTER_H_ */

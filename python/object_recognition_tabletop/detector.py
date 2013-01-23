@@ -3,132 +3,66 @@
 Module defining the transparent objects detector to find objects in a scene
 """
 
-import ecto
-from object_recognition_tabletop.ecto_cells.tabletop_table import TablePose, Clusterer, TableDetector
-from object_recognition_tabletop.ecto_cells import tabletop_object
-from ecto_image_pipeline.base import RescaledRegisteredDepth
-from ecto_image_pipeline.conversion import MatToPointCloudXYZOrganized
-from ecto_opencv.calib import DepthTo3d
+from ecto import BlackBoxCellInfo as CellInfo, BlackBoxForward as Forward
 from object_recognition_core.db import ObjectDb, ObjectDbParameters
-from object_recognition_core.pipelines.detection import DetectionPipeline
-from object_recognition_core.utils import json_helper
+from object_recognition_core.pipelines.detection import DetectorBase
+from object_recognition_tabletop.ecto_cells.tabletop_table import TablePose, Clusterer, TableDetector
+import ecto
 
-try:
-    import ecto_ros
-    ECTO_ROS_FOUND = True
-except ImportError:
-    ECTO_ROS_FOUND = False
+class TabletopTableDetector(ecto.BlackBox, DetectorBase):
+    def __init__(self, *args, **kwargs):
+        ecto.BlackBox.__init__(self, *args, **kwargs)
+        DetectorBase.__init__(self)
 
-class TabletopTableDetector(ecto.BlackBox):
-    table_detector = TableDetector
-    table_pose = TablePose
-    to_cloud_conversion = MatToPointCloudXYZOrganized
-    passthrough = ecto.PassthroughN
-    _clusterer = Clusterer
-    _depth_map = RescaledRegisteredDepth
-    _points3d = DepthTo3d
-    if ECTO_ROS_FOUND:
-        message_cvt = ecto_ros.Mat2Image
+    @classmethod
+    def declare_cells(cls, _p):
+        return {'passthrough': ecto.PassthroughN(items={'K': 'The original calibration matrix',
+                                                        'points3d': 'The 3d points as cv::Mat_<cv::Vec3f>.'}),
+                'table_detector': TableDetector(),
+                'table_pose': CellInfo(TablePose),
+                'clusterer': Clusterer()
+                }
 
-    def __init__(self, submethod, parameters, **kwargs):
-        self._submethod = submethod
-        self._parameters = parameters
+    def declare_forwards(self, p):
+        p = {'clusterer': 'all', 'table_detector': 'all'}
 
-        ecto.BlackBox.__init__(self, **kwargs)
+        i = {'passthrough': 'all'}
 
-    def declare_params(self, p):
-        if ECTO_ROS_FOUND:
-            p.forward('rgb_frame_id', cell_name='message_cvt', cell_key='frame_id')
+        o = {'table_detector': [Forward('clouds'),Forward('clouds_hull')],
+             'clusterer': [Forward('clusters')],
+             'table_pose': [Forward('pose_results')]
+             }
 
-    def declare_io(self, _p, i, o):
-        self.passthrough = ecto.PassthroughN(items=dict(image='An image',
-                                                   K='The camera matrix'
-                                                   ))
-        i.forward(['image', 'K'], cell_name='passthrough', cell_key=['image', 'K'])
-        #i.forward('mask', cell_name='to_cloud_conversion', cell_key='mask')
-        i.forward('depth', cell_name='_depth_map', cell_key='depth')
+        return (p,i,o)
 
-        o.forward('clouds', cell_name='table_detector', cell_key='clouds')
-        o.forward('clouds_hull', cell_name='table_detector', cell_key='clouds_hull')
-        o.forward('clusters', cell_name='_clusterer', cell_key='clusters')
-        o.forward('rotations', cell_name='table_detector', cell_key='rotations')
-        o.forward('translations', cell_name='table_detector', cell_key='translations')
-        o.forward('pose_results', cell_name='table_pose', cell_key='pose_results')
-
-    def configure(self, p, _i, _o):
-        vertical_direction = self._parameters.pop('vertical_direction', None)
-        if vertical_direction is not None:
-            self.table_pose = tabletop_table.TablePose(vertical_direction=vertical_direction)
-        else:
-            self.table_pose = TablePose()
-        if self._parameters:
-            param = self._parameters
-            if 'object_ids' in param:
-                param.pop('object_ids')
-            self.table_detector = TableDetector(**self._parameters)
-        else:
-            self.table_detector = TableDetector()
-        self._depth_map = RescaledRegisteredDepth()
-        self._points3d = DepthTo3d()
-        self.to_cloud_conversion = MatToPointCloudXYZOrganized()
-
-    def connections(self):
-        # Rescale the depth image and convert to 3d
-        connections = [ self.passthrough['image'] >> self._depth_map['image'],
-                       self._depth_map['depth'] >>  self._points3d['depth'],
-                       self.passthrough['K'] >> self._points3d['K'],
-                       self._points3d['points3d'] >> self.to_cloud_conversion['points'] ]
+    def connections(self, _p):
         # First find the table, then the pose
-        connections += [self.to_cloud_conversion['point_cloud'] >> self.table_detector['cloud'],
-                       self.table_detector['rotations'] >> self.table_pose['rotations'],
-                       self.table_detector['translations'] >> self.table_pose['translations'] ]
+        connections = [ self.passthrough['points3d', 'K'] >> self.table_detector['points3d', 'K'],
+                        self.table_detector['table_coefficients'] >> self.table_pose['table_coefficients'] ]
         # also find the clusters of points
-        connections += [self.to_cloud_conversion['point_cloud'] >> self._clusterer['cloud'],
-                       self.table_detector['clouds_hull'] >> self._clusterer['clouds_hull'] ]
+        connections += [ self.passthrough['points3d'] >> self.clusterer['points3d'],
+                         self.table_detector['table_coefficients'] >> self.clusterer['table_coefficients'],
+                         self.table_detector['table_mask'] >> self.clusterer['table_mask'] ]
 
         return connections
 
 ########################################################################################################################
 
-class TabletopTableDetectionPipeline(DetectionPipeline):
+class TabletopObjectDetector(ecto.BlackBox, DetectorBase):
 
-    @classmethod
-    def config_doc(cls):
-        return  """
-        # No parameters are required
-        parameters: ''
-        """
+    def __init__(self, *args, **kwargs):
+        self._params = kwargs
+        ecto.BlackBox.__init__(self, *args, **kwargs)
+        DetectorBase.__init__(self)
 
-    @classmethod
-    def type_name(cls):
-        return 'tabletop_table'
+    def declare_cells(self, _p):
+        from object_recognition_tabletop.ecto_cells import tabletop_object
 
-    @classmethod
-    def detector(self, *args, **kwargs):
-        submethod = kwargs.pop('subtype')
-        parameters = kwargs.pop('parameters')
+        return {'main': tabletop_object.ObjectRecognizer(object_ids=self._params['object_ids'],
+                                                         db=ObjectDb(ObjectDbParameters(self._params['db'])))}
 
-        return TabletopTableDetector(submethod, parameters, **kwargs)
+    def declare_forwards(self, p):
+        return ({},{'main':'all'},{'main':'all'})
 
-########################################################################################################################
-
-class TabletopObjectDetectionPipeline(DetectionPipeline):
-
-    @classmethod
-    def config_doc(cls):
-        return  """
-        """
-
-    @classmethod
-    def type_name(cls):
-        return 'tabletop_object'
-
-    @classmethod
-    def detector(self, *args, **kwargs):
-        visualize = kwargs.pop('visualize', False)
-        submethod = kwargs.pop('subtype')
-        parameters = kwargs.pop('parameters')
-        object_db = ObjectDb(parameters['db'])
-
-        return tabletop_object.ObjectRecognizer(object_ids=parameters['object_ids'],
-                                                db=object_db)
+    def connections(self, _p):
+        return [self.main]

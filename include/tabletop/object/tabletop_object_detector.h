@@ -70,7 +70,7 @@ namespace tabletop_object_detector
     clearObjects();
 
     void
-    addObject(int model_id, arm_navigation_msgs::Shape mesh);
+    addObject(int model_id, const shape_msgs::Mesh & mesh);
 
     /** Structure used a return type for objectDetection */
     template<class PointType>
@@ -93,7 +93,7 @@ namespace tabletop_object_detector
       std::vector<size_t> cluster_model_indices;
       std::vector<std::vector<ModelFitInfo> > raw_fit_results(clusters.size());
       cluster_model_indices.resize(clusters.size(), -1);
-      int num_models = 10;
+      int num_models = 1;
       for (size_t i = 0; i < clusters.size(); i++)
       {
         std::vector<ModelFitInfo> fit_results = detector_.fitBestModels<typename pcl::PointCloud<PointType> >(
@@ -103,7 +103,7 @@ namespace tabletop_object_detector
         final_fit_results.reserve(fit_results.size());
         BOOST_FOREACH(const ModelFitInfo & fit_info, fit_results)
             {
-              if (fit_info.getScore() >= confidence_cutoff)
+              if (fit_info.getScore() <= confidence_cutoff)
                 final_fit_results.push_back(fit_info);
             }
 
@@ -170,7 +170,7 @@ namespace tabletop_object_detector
         TabletopResult<PointType> result;
         result.object_id_ = raw_fit_results[i][0].getModelId();
         result.pose_ = raw_fit_results[i][0].getPose();
-        result.confidence_ = raw_fit_results[i][0].getScore();
+        result.confidence_ = 1.0 - (raw_fit_results[i][0].getScore() / confidence_cutoff);
         result.cloud_ = clusters[i];
 
         results.push_back(result);
