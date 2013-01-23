@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-
 from distutils.core import setup
+from catkin_pkg.python_setup import generate_distutils_setup
 
-setup(name='object_recognition_tabletop',
-      version='1.0.0',
-      description='Tabletop object recognition',
-      packages=['object_recognition_tabletop'],
-      package_dir={'':'python'}
-)
+d = generate_distutils_setup()
+d['packages'] = ['object_recognition_tabletop']
+d['package_dir'] = {'': 'python'}
+d['install_requires'] = []
+
+setup(**d)
