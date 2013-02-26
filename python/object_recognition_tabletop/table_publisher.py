@@ -2,13 +2,13 @@
 Module defining the Table Publisher
 """
 
-from object_recognition_ros.ecto_cells.io_ros import Publisher_Marker, Publisher_MarkerArray
-from object_recognition_core.io.sink import SinkBase
-from object_recognition_tabletop.ecto_cells.tabletop_table import TableMsgAssembler, TableVisualizationMsgAssembler
-from object_recognition_msgs.ecto_cells.ecto_object_recognition_msgs import Publisher_TableArray
-import ecto
 from ecto import BlackBoxCellInfo as CellInfo, BlackBoxForward as Forward
+from object_recognition_core.io.sink import SinkBase
 from object_recognition_ros import init_ros
+from object_recognition_ros.ecto_cells.ecto_object_recognition_msgs import Publisher_TableArray
+from object_recognition_ros.ecto_cells.io_ros import Publisher_Marker, Publisher_MarkerArray
+from object_recognition_tabletop.ecto_cells.tabletop_table import TableMsgAssembler, TableVisualizationMsgAssembler
+import ecto
 
 MarkerPub = Publisher_Marker
 MarkerArrayPub = Publisher_MarkerArray
@@ -41,7 +41,8 @@ class TablePublisher(ecto.BlackBox, SinkBase):
     def declare_direct_params(p):
         p.declare('latched', 'Determines if the topics will be latched.', True)
 
-    def declare_forwards(self, _p):
+    @staticmethod
+    def declare_forwards(_p):
         p = {'marker_array_hulls': [Forward('topic_name', 'marker_hull_topic',
                                            'The ROS topic to use for the table message.', 'marker_table_hulls')],
              'marker_array_origins': [Forward('topic_name', 'marker_origin_topic',
