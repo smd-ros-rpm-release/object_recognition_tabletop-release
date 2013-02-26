@@ -1,0 +1,5 @@
+if (NOT ${household_objects_database_LIBRARIES} STREQUAL "household_objects_database_LIBRARIES-NOTFOUND")
+add_subdirectory(db)
+endif()
+add_subdirectory(object)
+add_subdirectory(table)
