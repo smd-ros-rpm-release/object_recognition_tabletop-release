@@ -1,0 +1,15 @@
+Source: ros-fuerte-object-recognition-tabletop
+Section: misc
+Priority: extra
+Maintainer: Jon Binney <jbinney@willowgarage.com>, Vincent Rabaud <vrabaud@willowgarage.com>
+Build-Depends: debhelper (>= 7.0.50~), ros-fuerte-catkin, ros-fuerte-ecto, ros-fuerte-ecto-pcl, ros-fuerte-ecto-ros, ros-fuerte-moveit-msgs, ros-fuerte-object-recognition-core, ros-fuerte-object-recognition-msgs, ros-fuerte-opencv-candidate
+Homepage: http://ecto.willowgarage.com
+Standards-Version: 3.9.2
+
+Package: ros-fuerte-object-recognition-tabletop
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-fuerte-ecto, ros-fuerte-ecto-pcl, ros-fuerte-ecto-ros, ros-fuerte-object-recognition-core, ros-fuerte-object-recognition-msgs, ros-fuerte-opencv-candidate
+Description: A port of the old tabletop object recognition
+ .
+ This stack contains the packages:
+ * /tmp/tmp3nxLNz/clone: 
