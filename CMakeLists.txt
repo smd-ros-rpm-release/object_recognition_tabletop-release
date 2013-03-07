@@ -3,31 +3,17 @@ project(object_recognition_tabletop)
 
 find_package(catkin)
 
+set(TABLETOP_DO_OBJECT FALSE)
+
 if (${catkin_VERSION} VERSION_GREATER "0.5.28")
-find_package(catkin REQUIRED ecto ecto_pcl ecto_ros genmsg moveit_msgs object_recognition_core
-                             object_recognition_msgs opencv_candidate rosconsole roscpp shape_msgs)
+find_package(catkin REQUIRED ecto ecto_pcl ecto_ros genmsg household_objects_database_msgs
+                             moveit_core moveit_msgs object_recognition_core object_recognition_msgs opencv_candidate
+                             pcl_ros rosconsole roscpp shape_msgs sql_database tf)
 catkin_package(INCLUDE_DIRS include)
 add_definitions(-DROS_GROOVY_OR_ABOVE_FOUND=1)
 add_definitions(-DPCL_VERSION_GE_160=1)
 
-find_library(household_objects_database_LIBRARIES household_objects_database /opt/ros/groovy/stacks/object_manipulation/household_objects_database/lib)
-if (NOT ${household_objects_database_LIBRARIES} STREQUAL "household_objects_database_LIBRARIES-NOTFOUND")
-find_package(moveit_core)
-find_package(pcl_ros)
-find_package(sql_database)
-find_package(tf)
-list(APPEND catkin_LIBRARIES ${household_objects_database_LIBRARIES}
-                             ${moveit_core_LIBRARIES}
-                             ${pcl_ros_LIBRARIES}
-                             ${sql_database_LIBRARIES}
-                             ${tf_LIBRARIES}
-)
-list(APPEND catkin_INCLUDE_DIRS
-                                /opt/ros/groovy/stacks/object_manipulation/household_objects_database_msgs/msg_gen/cpp/include/
-                                /opt/ros/groovy/stacks/object_manipulation/household_objects_database_msgs/srv_gen/cpp/include/
-                                /opt/ros/groovy/stacks/object_manipulation/household_objects_database/include/
-)
-endif()
+set(TABLETOP_DO_OBJECT TRUE)
 
 else()
 add_definitions(-DROS_GROOVY_OR_ABOVE_FOUND=0)
@@ -54,6 +40,8 @@ if (NOT ${household_objects_database_LIBRARIES} STREQUAL "household_objects_data
 find_library(distance_field_LIBRARIES distance_field /opt/ros/fuerte/stacks/arm_navigation_experimental/distance_field/lib/)
 find_library(pcl_ros_tf_LIBRARIES pcl_ros_tf /opt/ros/fuerte/stacks/perception_pcl/pcl_ros/lib)
 find_library(tf_LIBRARIES tf /opt/ros/fuerte/stacks/geometry/tf/lib/)
+
+set(TABLETOP_DO_OBJECT TRUE)
 
 list(APPEND catkin_INCLUDE_DIRS /opt/ros/fuerte/stacks/arm_navigation/arm_navigation_msgs/msg_gen/cpp/include/
                                 /opt/ros/fuerte/stacks/arm_navigation_experimental/distance_field/include/
@@ -113,7 +101,7 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/conf
         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-# install the incldue folder
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/object_recognition_tabletop
+# install the include folder
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/object_recognition_tabletop/
         DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
 )
