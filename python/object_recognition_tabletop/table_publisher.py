@@ -56,16 +56,16 @@ class TablePublisher(ecto.BlackBox, SinkBase):
              }
 
         i = {'table_msg_assembler': [Forward('clouds_hull')],
-             'table_visualization_msg_assembler': [Forward('clusters'), Forward('table_array_msg')],
+             'table_visualization_msg_assembler': [Forward('clusters3d'), Forward('table_array_msg')],
              'passthrough': [Forward('image_message'), Forward('pose_results')]}
 
         return (p,i,{})
 
     def connections(self, _p):
-        connections = [self.passthrough['image_message'] >> self.table_msg_assembler['image_message'],
-                       self.passthrough['image_message'] >> self.table_visualization_msg_assembler['image_message'],
-                       self.passthrough['pose_results'] >> self.table_msg_assembler['pose_results'],
-                       self.passthrough['pose_results'] >> self.table_visualization_msg_assembler['pose_results'] ]
+        connections = [self.passthrough['image_message','pose_results'] >>
+                                                self.table_msg_assembler['image_message','pose_results'],
+                       self.passthrough['image_message','pose_results'] >>
+                                                self.table_visualization_msg_assembler['image_message','pose_results'] ]
 
         connections += [ self.table_msg_assembler['table_array_msg'] >> self.table_array[:],
                         self.table_msg_assembler['table_array_msg'] >> self.table_visualization_msg_assembler['table_array_msg'] ]

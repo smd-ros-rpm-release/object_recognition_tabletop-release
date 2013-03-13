@@ -35,6 +35,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
 #include <boost/foreach.hpp>
 #include <boost/python.hpp>
@@ -108,14 +109,16 @@ namespace tabletop
       //boost::python::stl_input_iterator<std::string> begin(python_object_ids), end;
       //std::copy(begin, end, std::back_inserter(object_ids));
 
-      object_recognizer_ = tabletop_object_detector::TabletopObjectRecognizer();
+    object_recognizer_ = tabletop_object_detector::TabletopObjectRecognizer();
 
-      object_recognition_core::db::ObjectDbParameters parameters(*json_db_params_);
-      household_objects_database::ObjectsDatabase *database = new household_objects_database::ObjectsDatabase(
-          parameters.at("host").get_str(), parameters.at("port").get_str(), parameters.at("user").get_str(),
-          parameters.at("password").get_str(), parameters.at("name").get_str());
+    object_recognition_core::db::ObjectDbParameters parameters(*json_db_params_);
+
+    db_.reset(new ObjectDbSqlHousehold());
+    db_->set_parameters(parameters);
+    boost::shared_ptr<household_objects_database::ObjectsDatabase> database = db_->db();
 
       std::vector<boost::shared_ptr<household_objects_database::DatabaseScaledModel> > models;
+      std::cout << "Loading model set: " << model_set << std::endl;
       if (!database->getScaledModelsBySet(models, model_set))
         return;
 
@@ -129,24 +132,32 @@ namespace tabletop
         arm_navigation_msgs::Shape mesh;
 #endif
 
-        if (!database->getScaledModelMesh(model_id, mesh))
+        std::cout << "Loading model: " << model_id;
+        if (!database->getScaledModelMesh(model_id, mesh)) {
+          std::cout << "  ... Failed" << std::endl;
           continue;
+        }
 
 #if ROS_GROOVY_OR_ABOVE_FOUND
         object_recognizer_.addObject(model_id, mesh);
 #else
         object_recognizer_.addObject(model_id, an_shape_to_mesh(mesh));
 #endif
+        std::cout << std::endl;
       }
     }
 
-    static void
-    declare_params(ecto::tendrils& params)
-    {
-      params.declare(&ObjectRecognizer::object_ids_, "json_object_ids",
-                     "The DB id of the objects to load in the household database.").required(true);
-      params.declare(&ObjectRecognizer::json_db_params_, "json_db", "The DB parameters").required(true);
-    }
+  static void declare_params(ecto::tendrils& params) {
+    params.declare(
+        &ObjectRecognizer::object_ids_, "json_object_ids",
+        "The DB id of the objects to load in the household database.");
+    params.declare(
+        &ObjectRecognizer::tabletop_object_ids_, "tabletop_object_ids",
+        "The object_ids set as defined by the household object database.",
+        "REDUCED_MODEL_SET");
+    params.declare(&ObjectRecognizer::json_db_params_, "json_db",
+                   "The DB parameters").required(true);
+  }
 
     static void
     declare_io(const tendrils& params, tendrils& inputs, tendrils& outputs)
@@ -160,8 +171,8 @@ namespace tabletop
     void
     configure(const tendrils& params, const tendrils& inputs, const tendrils& outputs)
     {
-      object_ids_.set_callback(boost::bind(&ObjectRecognizer::ParameterCallback, this, _1));
-      object_ids_.dirty(true);
+      tabletop_object_ids_.set_callback(boost::bind(&ObjectRecognizer::ParameterCallback, this, _1));
+      tabletop_object_ids_.dirty(true);
 
       perform_fit_merge_ = true;
       confidence_cutoff_ = 0.01f;
@@ -212,12 +223,6 @@ namespace tabletop
       }
         object_recognizer_.objectDetection<pcl::PointXYZ>(clusters_merged, confidence_cutoff_, perform_fit_merge_, results);
 
-      or_json::mValue value;
-      or_json::read(*json_db_params_, value);
-      ObjectDbParametersRaw params = value.get_obj();
-
-      object_recognition_core::db::ObjectDbPtr db(new ObjectDbSqlHousehold(params));
-
         for (size_t i = 0; i < results.size(); ++i)
         {
           const tabletop_object_detector::TabletopObjectRecognizer::TabletopResult<pcl::PointXYZ> & result = results[i];
@@ -228,7 +233,7 @@ namespace tabletop
           // Add the object id
           std::stringstream ss;
           ss << result.object_id_;
-          pose_result.set_object_id(db, ss.str());
+          pose_result.set_object_id(db_, ss.str());
 
           // Add the pose
           const geometry_msgs::Pose &pose = result.pose_;
@@ -257,6 +262,8 @@ namespace tabletop
     }
   private:
     typedef std::vector<tabletop_object_detector::ModelFitInfo> ModelFitInfos;
+    /** The db we are dealing with */
+    boost::shared_ptr<ObjectDbSqlHousehold> db_;
     /** The object recognizer */
     tabletop_object_detector::TabletopObjectRecognizer object_recognizer_;
     /** The resulting poses of the objects */
@@ -269,6 +276,7 @@ namespace tabletop
     float confidence_cutoff_;
     bool perform_fit_merge_;
     ecto::spore<std::string> object_ids_;
+    ecto::spore<std::string> tabletop_object_ids_;
     ecto::spore<std::string> json_db_params_;
   };
 }
