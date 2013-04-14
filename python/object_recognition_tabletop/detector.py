@@ -13,7 +13,7 @@ import ecto
 class TabletopTableDetector(ecto.BlackBox, DetectorBase):
     def __init__(self, *args, **kwargs):
         ecto.BlackBox.__init__(self, *args, **kwargs)
-        DetectorBase.__init__(self)
+        DetectorBase.__init__(self, do_check_object_ids=False, do_check_db=False)
 
     @classmethod
     def declare_cells(cls, _p):
@@ -24,13 +24,14 @@ class TabletopTableDetector(ecto.BlackBox, DetectorBase):
                 'clusterer': OnPlaneClusterer()
                 }
 
-    def declare_forwards(self, p):
+    @staticmethod
+    def declare_forwards(p):
         p = {'clusterer': 'all', 'table_detector': 'all'}
 
         i = {'passthrough': 'all'}
 
-        o = {'table_detector': [Forward('clouds_hull')],
-             'clusterer': [Forward('clusters2d'), Forward('clusters3d')],
+        o = {'clusterer': [Forward('clusters2d'), Forward('clusters3d')],
+             'table_detector': [Forward('clouds_hull'), Forward('table_coefficients')],
              'table_pose': [Forward('pose_results')]
              }
 
@@ -42,8 +43,8 @@ class TabletopTableDetector(ecto.BlackBox, DetectorBase):
                         self.table_detector['table_coefficients'] >> self.table_pose['table_coefficients'] ]
         # also find the clusters of points
         connections += [ self.passthrough['points3d'] >> self.clusterer['points3d'],
-                         self.table_detector['table_coefficients'] >> self.clusterer['planes'],
-                         self.table_detector['table_mask'] >> self.clusterer['masks'] ]
+                         self.table_detector['table_coefficients', 'table_mask'] >> self.clusterer['planes', 'masks'],
+                         ]
 
         return connections
 
@@ -52,18 +53,18 @@ class TabletopTableDetector(ecto.BlackBox, DetectorBase):
 class TabletopObjectDetector(ecto.BlackBox, DetectorBase):
 
     def __init__(self, *args, **kwargs):
-        self._params = kwargs
         ecto.BlackBox.__init__(self, *args, **kwargs)
         DetectorBase.__init__(self)
 
-    def declare_cells(self, _p):
+    @staticmethod
+    def declare_cells(_p):
         from object_recognition_tabletop.ecto_cells import tabletop_object
 
-        return {'main': tabletop_object.ObjectRecognizer(object_ids=self._params['json_object_ids'],
-                                                         db=ObjectDb(ObjectDbParameters(self._params['json_db'])))}
+        return {'main': CellInfo(tabletop_object.ObjectRecognizer)}
 
-    def declare_forwards(self, p):
-        return ({},{'main':'all'},{'main':'all'})
+    @staticmethod
+    def declare_forwards(_p):
+        return ({'main':'all'}, {'main':'all'}, {'main':'all'})
 
     def connections(self, _p):
         return [self.main]
