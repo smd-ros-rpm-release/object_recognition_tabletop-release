@@ -34,15 +34,12 @@
  */
 
 #include <sstream>
-#include <object_recognition_core/db/db.h>
 #include <object_recognition_tabletop/household.h>
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 ObjectDbSqlHousehold::ObjectDbSqlHousehold()
 {
-  object_recognition_core::db::ObjectDbParameters parameters(default_raw_parameters());
-  this->set_parameters(parameters);
 }
 
 void
@@ -140,7 +137,7 @@ ObjectDbSqlHousehold::Delete(const ObjectId & id)
 
 void
 ObjectDbSqlHousehold::QueryView(const object_recognition_core::db::View & view, int limit_rows, int start_offset,
-                            int& total_rows, int& offset, std::vector<ViewElement> & view_elements)
+                            int& total_rows, int& offset, std::vector<Document> & view_elements)
 {
   switch (view.type())
   {
@@ -154,7 +151,7 @@ ObjectDbSqlHousehold::QueryView(const object_recognition_core::db::View & view, 
         household_objects_database::DatabaseMesh mesh;
         db_->getScaledModelMesh(atoi(key.get_str().c_str()), mesh);
 
-        std::stringstream stream;
+	std::stringstream stream(std::ios::in | std::ios::out | std::ios::binary);
         // Write the mesh to a stream according to the specs at http://en.wikipedia.org/wiki/STL_%28file_format%29
         int sizeof_uc = 1;
         int sizeof_us = 2;
@@ -210,8 +207,10 @@ ObjectDbSqlHousehold::QueryView(const object_recognition_core::db::View & view, 
           stream.write(reinterpret_cast<char*>(&zero_us), sizeof_us);
         }
 
+	stream.seekg(0);
         // Create the view element
-        ViewElement view_element("", key.get_str());
+        object_recognition_core::db::Document view_element;
+        view_element.SetIdRev("", key.get_str());
         view_element.set_field("name", key.get_str());
         view_element.set_attachment_stream("mesh", stream);
         view_elements.push_back(view_element);
@@ -226,7 +225,8 @@ ObjectDbSqlHousehold::QueryView(const object_recognition_core::db::View & view, 
       std::string options;
       if (view.key(key))
       {
-        ViewElement view_element("", key.get_str());
+        object_recognition_core::db::Document view_element;
+        view_element.SetIdRev("", key.get_str());
         view_element.set_field("name", key.get_str());
         view_elements.push_back(view_element);
       }
@@ -239,7 +239,7 @@ ObjectDbSqlHousehold::QueryView(const object_recognition_core::db::View & view, 
 
 void
 ObjectDbSqlHousehold::QueryGeneric(const std::vector<std::string> & queries, int limit_rows, int start_offset, int& total_rows,
-                            int& offset, std::vector<ViewElement> & view_elements)
+                            int& offset, std::vector<Document> & view_elements)
 {
   throw std::runtime_error("Function not implemented in the SQL household DB.");
 }
@@ -250,7 +250,7 @@ ObjectDbSqlHousehold::QueryGeneric(const std::vector<std::string> & queries, int
 void
 ObjectDbSqlHousehold::QueryView(const std::string & in_url, int limit_rows, int start_offset,
                                 const std::string &options, int& total_rows, int& offset,
-                                std::vector<ViewElement> & view_elements, bool do_throw)
+                                std::vector<Document> & view_elements, bool do_throw)
 {
   throw std::runtime_error("Function not implemented in the SQL household DB.");
 }
