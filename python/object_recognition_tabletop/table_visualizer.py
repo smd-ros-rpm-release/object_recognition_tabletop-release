@@ -16,17 +16,19 @@ class TableVisualizer(ecto.BlackBox):
     def __init__(self, *args, **kwargs):
         ecto.BlackBox.__init__(self, *args, **kwargs)
 
-    @classmethod
-    def declare_cells(cls, p):
-        return {'cluster_drawer': CellInfo(ClusterDrawer)}
+    @staticmethod
+    def declare_cells(p):
+        return {'cluster_drawer': CellInfo(ClusterDrawer),
+                'plane_drawer': CellInfo(PlaneDrawer)}
 
-    def declare_forwards(self, _p):
-        i = {'cluster_drawer': [Forward('clusters2d')]}
+    @staticmethod
+    def declare_forwards(_p):
+        i = {'cluster_drawer': [Forward('clusters2d')],
+             'plane_drawer': [Forward('image'), Forward('masks', 'plane_mask')]}
 
         return ({},i,{})
 
     def configure(self, _p, _i, _o):
-        self.plane_drawer = PlaneDrawer()
         self.imshow = imshow('Tabletop table results')
 
     def connections(self, _p):

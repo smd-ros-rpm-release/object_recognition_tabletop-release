@@ -1,10 +1,10 @@
 <stack>
   <name>object_recognition_tabletop</name>
-  <version>0.2.17</version>
+  <version>0.2.22</version>
   <description>A port of the old tabletop object recognition</description>
   <author>Marius Muja</author>
   <author email="vrabaud@willowgarage.com">Vincent Rabaud</author>
-  <maintainer email="vrabaud@willowgarage.com">Vincent Rabaud</maintainer>
+  <maintainer email="vincent.rabaud@gmail.com">Vincent Rabaud</maintainer>
   <maintainer email="jbinney@willowgarage.com">Jon Binney</maintainer>
   <license>BSD</license>
   <copyright>Willow Garage</copyright>
@@ -14,8 +14,6 @@
   <build_depends>ecto</build_depends>
   <build_depends>ecto_pcl</build_depends>
   <build_depends>ecto_ros</build_depends>
-  <build_depends>geometry</build_depends>
-  <build_depends>moveit_msgs</build_depends>
   <build_depends>object_recognition_core</build_depends>
   <build_depends>object_recognition_msgs</build_depends>
   <build_depends>opencv_candidate</build_depends>
@@ -23,7 +21,6 @@
   <depends>ecto</depends>
   <depends>ecto_pcl</depends>
   <depends>ecto_ros</depends>
-  <depends>geometry</depends>
   <depends>object_recognition_core</depends>
   <depends>object_recognition_msgs</depends>
   <depends>opencv_candidate</depends>
