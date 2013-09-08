@@ -36,11 +36,7 @@
 
 #include "tabletop_object_detector/model_fitter.h"
 
-#if ROS_GROOVY_OR_ABOVE_FOUND
 #include <moveit/distance_field/propagation_distance_field.h>
-#else
-#include <distance_field/propagation_distance_field.h>
-#endif
 #include "tabletop_object_detector/iterative_distance_fitter.h"
 
 namespace tabletop_object_detector {
@@ -101,7 +97,6 @@ void DistanceFieldFitter::initializeFromBtVectors(const std::vector<tf::Vector3>
 								      min[2] - table_padding,
 								      2 * truncate_value_ );
   distance_voxel_grid_->reset();
-#if ROS_GROOVY_OR_ABOVE_FOUND
   EigenSTL::vector_Vector3d eigen_points(points.size());
   for(size_t i = 0; i < points.size(); ++i)
   {
@@ -110,9 +105,6 @@ void DistanceFieldFitter::initializeFromBtVectors(const std::vector<tf::Vector3>
     eigen_points[i][2] = points[i][2];
   }
   distance_voxel_grid_->addPointsToField(eigen_points);
-#else
-  distance_voxel_grid_->addPointsToField(points);
-#endif
 }
 
 double dist(const tf::Vector3 &v0, const tf::Vector3 &v1)
@@ -219,6 +211,13 @@ void ModelToCloudFitter::sampleMesh(const shape_msgs::Mesh &mesh,
 void DistanceFieldFitter::initializeFromMesh(const shape_msgs::Mesh &mesh)
 {
   std::vector<tf::Vector3> btVectors;
+  model_points_.reserve(mesh.vertices.size());
+  typedef std::vector<geometry_msgs::Point>::const_iterator I;
+  for (I i = mesh.vertices.begin(); i != mesh.vertices.end(); i++)
+    model_points_.push_back(tf::Vector3(i->x,i->y,i->z));
+  // 20mm resolution
+  //sampleMesh(mesh, model_points_, 0.02 );
+
   //we use a slightly larger resolution than the distance field, in an attempt to bring
   //down pre-computation time
   sampleMesh(mesh, btVectors,  1.5 * distance_field_resolution_ ); 
