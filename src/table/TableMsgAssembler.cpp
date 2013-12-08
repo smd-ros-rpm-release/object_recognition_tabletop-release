@@ -101,6 +101,7 @@ struct TableMsgAssembler {
       addConvexHullTable(table, cloud_hull, R, T);
       table_array_msg.tables.push_back(table);
     }
+    table_array_msg.header = message_header;
 
     outputs["table_array_msg"] << object_recognition_msgs::TableArrayConstPtr(new object_recognition_msgs::TableArray(table_array_msg));
 
@@ -117,40 +118,13 @@ private:
       vertex.x = point[0];
       vertex.y = point[1];
       vertex.z = point[2];
-      table.convex_hull.vertices.push_back(vertex);
-
-      if (i == 0 || i == convex_hull.size() - 1)
-        continue;
-
-      shape_msgs::MeshTriangle tri;
-      tri.vertex_indices[0] = 0;
-      tri.vertex_indices[1] = i;
-      tri.vertex_indices[2] = i + 1;
-      table.convex_hull.triangles.push_back(tri);
+      table.convex_hull.push_back(vertex);
     }
   }
 
   object_recognition_msgs::Table
   getTable(const std_msgs::Header& cloud_header, const std::vector<cv::Vec3f>& convex_hull, const cv::Matx33f& R, const cv::Vec3f& T) {
     object_recognition_msgs::Table table;
-
-    //get the extents of the table
-    table.x_min = std::numeric_limits<float>::max();
-    table.x_max = -table.x_min;
-    table.y_min = std::numeric_limits<float>::max();
-    table.y_max = -table.y_min;
-
-    for (size_t i = 0; i < convex_hull.size(); ++i) {
-      cv::Vec3f point = R.t() * (convex_hull[i] - T);
-      if (point[0] < table.x_min && point[0] > -3.0)
-        table.x_min = point[0];
-      if (point[0] > table.x_max && point[0] < 3.0)
-        table.x_max = point[0];
-      if (point[1] < table.y_min && point[1] > -3.0)
-        table.y_min = point[1];
-      if (point[1] > table.y_max && point[1] < 3.0)
-        table.y_max = point[1];
-    }
 
     geometry_msgs::Pose table_pose;
     table_pose.position.x = T[0];
@@ -164,8 +138,8 @@ private:
     table_pose.orientation.y = quaternion.y();
     table_pose.orientation.z = quaternion.z();
 
-    table.pose.pose = table_pose;
-    table.pose.header = cloud_header;
+    table.pose = table_pose;
+    table.header = cloud_header;
 
     return table;
   }
