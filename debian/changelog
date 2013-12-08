@@ -1,0 +1,7 @@
+ros-hydro-object-recognition-tabletop (0.3.0-0quantal) quantal; urgency=high
+
+  * move the visualization of the Table to object_recognition_ros
+
+ -- Vincent Rabaud <vincent.rabaud@gmail.com>  Sun, 08 Dec 2013 19:17:06 +0100
+
+
