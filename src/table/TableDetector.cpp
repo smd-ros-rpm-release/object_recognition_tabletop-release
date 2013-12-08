@@ -39,8 +39,35 @@
 #include <opencv2/rgbd/rgbd.hpp>
 #include <tf/transform_listener.h>
 #include <ros/ros.h>
+#include <object_recognition_core/common/pose_result.h>
 
+using object_recognition_core::common::PoseResult;
 using ecto::tendrils;
+
+/**
+ * If the equation of the plane is ax+by+cz+d=0, the pose (R,t) is such that it takes the horizontal plane (z=0)
+ * to the current equation
+ */
+void
+getPlaneTransform(const cv::Vec4f& plane_coefficients, cv::Matx33f& rotation, cv::Vec3f& translation)
+{
+  double a = plane_coefficients[0], b = plane_coefficients[1], c = plane_coefficients[2], d = plane_coefficients[3];
+  // assume plane coefficients are normalized
+  translation = cv::Vec3f(-a * d, -b * d, -c * d);
+  cv::Vec3f z(a, b, c);
+
+  //try to align the x axis with the x axis of the original frame
+  //or the y axis if z and x are too close too each other
+  cv::Vec3f x(1, 0, 0);
+  if (fabs(z.dot(x)) > 1.0 - 1.0e-4)
+    x = cv::Vec3f(0, 1, 0);
+  cv::Vec3f y = z.cross(x);
+  x = y.cross(z);
+  x = x / norm(x);
+  y = y / norm(y);
+
+  rotation = cv::Matx33f(x[0], y[0], z[0], x[1], y[1], z[1], x[2], y[2], z[2]);
+}
 
 namespace tabletop
 {
@@ -70,6 +97,7 @@ namespace tabletop
       outputs.declare(&TableDetector::table_coefficients_, "table_coefficients", "The coefficients of planar surfaces.");
       outputs.declare(&TableDetector::table_mask_, "table_mask", "The mask of planar surfaces.");
       outputs.declare(&TableDetector::clouds_hull_, "clouds_hull", "Hulls of the samples.");
+      outputs.declare(&TableDetector::pose_results_, "pose_results", "The results of object recognition");
     }
 
 
@@ -77,7 +105,7 @@ namespace tabletop
     configure(const tendrils& params, const tendrils& inputs, const tendrils& outputs)
     {
       ros::NodeHandle nh("~");
-      nh.param("filter_planes", filter_planes_, true);
+      nh.param("filter_planes", filter_planes_, false);
       nh.param("min_table_height", min_table_height_, 0.5);
       nh.param("max_table_height", max_table_height_, 1.0);
       nh.param("robot_frame", robot_frame_id_, std::string("/base_link"));
@@ -109,6 +137,7 @@ namespace tabletop
   {
     clouds_hull_->clear();
     table_coefficients_->clear();
+    pose_results_->clear();
     if (!filter_planes_ || tf_->waitForTransform(robot_frame_id_, sensor_frame_id_, ros::Time(0), ros::Duration(0.5)))
     {
       if ((points3d_->rows != prev_image_rows_) || (points3d_->cols != prev_image_cols_))
@@ -215,6 +244,42 @@ namespace tabletop
             else
               table_coefficients_->push_back(-plane_coefficients[i]);
 
+            // Compute the transforms
+            cv::Matx33f R;
+            cv::Vec3f T;
+            getPlaneTransform((*table_coefficients_)[i], R, T);
+            PoseResult pose_result;
+            pose_result.set_R(cv::Mat(R));
+
+            // Get the center of the hull
+            cv::Moments m = moments(hull);
+            int y = int(m.m01/m.m00), x = int(m.m10/m.m00);
+            int y_min = y, y_max = y, x_min = x, x_max = x;
+            cv::Vec3f center;
+            // Make sure we get a non-NaN
+            bool is_found = false;
+            while (!is_found) {
+
+              for(x = x_min; x <= x_max && !is_found; ++x) {
+                if (is_found = (table_mask_->at<uchar>(y_min, x) == i))
+                  center = (*points3d_).at<cv::Vec3f>(y_min, x);
+                if (is_found = (table_mask_->at<uchar>(y_max, x) == i))
+                  center = (*points3d_).at<cv::Vec3f>(y_max, x);
+              }
+              for(int y = y_min+1; y <= y_max-1 && !is_found; ++y) {
+                if (is_found = (table_mask_->at<uchar>(y, x_min) == i))
+                  center = (*points3d_).at<cv::Vec3f>(y, x_min);
+                if (is_found = (table_mask_->at<uchar>(y, x_max) == i))
+                  center = (*points3d_).at<cv::Vec3f>(y, x_max);
+              }
+              --x_min;
+              --y_min;
+              ++x_max;
+              ++y_max;
+            }
+            pose_result.set_T(cv::Mat(center));
+            pose_results_->push_back(pose_result);
+
             // Add the point cloud
             std::vector<cv::Vec3f> out;
             out.reserve(hull.size());
@@ -260,6 +325,9 @@ namespace tabletop
     ecto::spore<std::string> up_frame_id_;
 
     ecto::spore<float> table_cluster_tolerance_;
+
+    /** The poses of the different planes */
+    ecto::spore<std::vector<PoseResult> > pose_results_;
 
     /** Cache the size of the previous image */
     int prev_image_rows_, prev_image_cols_;
