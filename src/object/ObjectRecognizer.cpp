@@ -45,8 +45,7 @@
 #include <ecto/ecto.hpp>
 #include <Eigen/StdVector>
 #include <Eigen/Geometry>
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
+#include "point_cloud2_proxy.h"
 
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
@@ -58,12 +57,13 @@
 
 #include <object_recognition_core/common/pose_result.h>
 #include <object_recognition_core/common/types.h>
+#include <object_recognition_core/db/ModelReader.h>
 
 #include <object_recognition_tabletop/household.h>
 
-#if PCL_VERSION_COMPARE(>=,1,7,0)
-#include <pcl_conversions/pcl_conversions.h>
-#endif
+#include <assimp/cimport.h>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
 
 using object_recognition_core::common::PoseResult;
 
@@ -96,65 +96,168 @@ getPlaneTransform(const cv::Vec4f& plane_coefficients, cv::Matx33f& rotation, cv
 
 namespace tabletop
 {
-  /** Ecto implementation of a module that recognizes objects using the tabletop code
-   *
-   */
-  struct ObjectRecognizer
-  {
-    void
-    ParameterCallback(const std::string &model_set)
-    {
-      //std::vector<object_recognition_core::db::ModelId> object_ids;
+/** Ecto implementation of a module that recognizes objects using the tabletop code
+ */
+struct ObjectRecognizer : public object_recognition_core::db::bases::ModelReaderBase {
+  virtual
+  void parameter_callback(const object_recognition_core::db::Documents& db_documents) {
+    object_recognizer_.clearObjects();
 
-      //boost::python::stl_input_iterator<std::string> begin(python_object_ids), end;
-      //std::copy(begin, end, std::back_inserter(object_ids));
+    aiLogStream* ai_stream_ = new aiLogStream(aiGetPredefinedLogStream(aiDefaultLogStream_STDOUT, NULL));
+    aiAttachLogStream(ai_stream_);
 
-    object_recognizer_ = tabletop_object_detector::TabletopObjectRecognizer <pcl::PointXYZ>();
+    BOOST_FOREACH(const object_recognition_core::db::Document & document, db_documents) {
+      // Get the list of _attachments and figure out the original mesh
+      std::vector<std::string> attachments_names = document.attachment_names();
+      std::string mesh_path;
+      BOOST_FOREACH(const std::string & attachment_name, attachments_names) {
+        if (attachment_name.find("original") != 0)
+          continue;
+        // Create a temporary file
+        char mesh_path_tmp[L_tmpnam];
+        tmpnam(mesh_path_tmp);
+        mesh_path = std::string(mesh_path_tmp) + attachment_name.substr(8);
 
-    object_recognition_core::db::ObjectDbParameters parameters(*json_db_params_);
+        // Load the mesh and save it to the temporary file
+        std::ofstream mesh_file;
+        mesh_file.open(mesh_path.c_str());
+        document.get_attachment_stream(attachment_name, mesh_file);
+        mesh_file.close();
+        break;
+      }
+
+      // Create a fake ID
+      static int i = 0;
+      household_id_to_db_id_[i] = document.get_field<std::string>("object_id");
+
+      // Load the mesh through assimp
+      std::cout << "Loading model: " << document.id() << " for object id: " << household_id_to_db_id_[i];
+
+      const struct aiScene* scene = aiImportFile(mesh_path.c_str(), aiProcess_FindDegenerates |
+      aiProcess_FindInvalidData |
+      aiProcess_ImproveCacheLocality |
+      aiProcess_JoinIdenticalVertices |
+      aiProcess_OptimizeGraph |
+      aiProcess_OptimizeMeshes |
+      aiProcess_RemoveRedundantMaterials |
+      aiProcess_SortByPType |
+      aiProcess_Triangulate |
+      aiProcess_RemoveComponent |
+      aiProcess_FlipUVs |
+      aiProcess_ValidateDataStructure |
+      aiProcess_MakeLeftHanded);
+      const aiNode* nd = scene->mRootNode;
+
+      // Load the meshes and convert them to a shape_msgs::Mesh
+      shape_msgs::Mesh mesh_msg;
+      double min_z = std::numeric_limits<double>::max();
+      for (size_t i_mesh = 0; i_mesh < scene->mNumMeshes; ++i_mesh) {
+        const struct aiMesh* mesh = scene->mMeshes[i_mesh];
+        size_t size_ini = mesh_msg.vertices.size();
+        mesh_msg.vertices.resize(size_ini + mesh->mNumVertices);
+        for (size_t j = 0; j < mesh->mNumVertices; ++j) {
+          const aiVector3D& vertex = mesh->mVertices[j];
+          mesh_msg.vertices[size_ini + j].x = vertex.x;
+          mesh_msg.vertices[size_ini + j].y = vertex.y;
+          mesh_msg.vertices[size_ini + j].z = vertex.z;
+          if (vertex.z < min_z)
+            min_z = vertex.z;
+        }
+
+        size_t size_ini_triangles = mesh_msg.triangles.size();
+        mesh_msg.triangles.resize(size_ini_triangles + mesh->mNumFaces);
+        size_t j_triangles = size_ini_triangles;
+        for (size_t j = 0; j < mesh->mNumFaces; ++j) {
+          const aiFace& face = mesh->mFaces[j];
+          for (size_t k = 0; k < 3; ++k)
+            mesh_msg.triangles[j_triangles].vertex_indices[k] = size_ini + face.mIndices[k];
+          ++j_triangles;
+        }
+        mesh_msg.triangles.resize(j_triangles);
+      }
+
+      // Make sure z=0 is the minimum z for this mesh
+      for (size_t i = 0; i < mesh_msg.vertices.size(); ++i)
+        mesh_msg.vertices[i].z -= min_z;
+
+      min_z_[document.get_field<std::string>("object_id")] = min_z;
+
+      object_recognizer_.addObject(i, mesh_msg);
+
+      std::cout << std::endl;
+
+      aiReleaseImport(scene);
+    }
+
+    aiDetachAllLogStreams();
+  }
+
+  virtual void
+  parameterCallbackJsonDb(const std::string& json_db) {
+    *json_db_ = json_db;
+    if (json_db_->empty())
+      return;
+
+    object_recognition_core::db::ObjectDbParameters parameters(*json_db_);
 
     if (parameters.type() == object_recognition_core::db::ObjectDbParameters::NONCORE) {
       // If we are dealing with a household DB
-      ObjectDbSqlHousehold *db = new ObjectDbSqlHousehold();
-      db->set_parameters(parameters);
-      db_.reset(db);
-      boost::shared_ptr<household_objects_database::ObjectsDatabase> database = db->db();
-
-      std::vector<boost::shared_ptr<household_objects_database::DatabaseScaledModel> > models;
-      std::cout << "Loading model set: " << model_set << std::endl;
-      if (!database->getScaledModelsBySet(models, model_set))
-        return;
-
-      object_recognizer_.clearObjects();
-      for (size_t i = 0; i < models.size(); i++) {
-        int model_id = models[i]->id_.data();
-        shape_msgs::Mesh mesh;
-
-        std::cout << "Loading model: " << model_id;
-        if (!database->getScaledModelMesh(model_id, mesh)) {
-          std::cout << "  ... Failed" << std::endl;
-          continue;
-        }
-
-        object_recognizer_.addObject(model_id, mesh);
-        std::cout << std::endl;
-      }
+      db_.reset(new ObjectDbSqlHousehold());
+      db_->set_parameters(parameters);
     } else {
-      // We are dealing with a core DB so read meshes from that DB
-      // TODO
+      // If we are dealing with an ORK DB
+      if (!db_)
+        db_ = ObjectDbParameters(*json_db_).generateDb();
+      parameterCallbackCommon();
     }
   }
 
+  void
+  parameterCallbackModelSet(const std::string& model_set) {
+    //std::vector<object_recognition_core::db::ModelId> object_ids;
+
+    //boost::python::stl_input_iterator<std::string> begin(python_object_ids), end;
+    //std::copy(begin, end, std::back_inserter(object_ids));
+
+    object_recognition_core::db::ObjectDbParameters parameters(*json_db_);
+
+    if (parameters.type() != object_recognition_core::db::ObjectDbParameters::NONCORE)
+      return;
+
+    object_recognizer_ = tabletop_object_detector::TabletopObjectRecognizer();
+
+    boost::shared_ptr<household_objects_database::ObjectsDatabase> database = dynamic_cast<ObjectDbSqlHousehold*>(&(*db_))->db();
+
+    std::vector<boost::shared_ptr<household_objects_database::DatabaseScaledModel> > models;
+    std::cout << "Loading model set: " << model_set << std::endl;
+    if (!database->getScaledModelsBySet(models, model_set))
+      return;
+
+    object_recognizer_.clearObjects();
+    for (size_t i = 0; i < models.size(); i++) {
+      int model_id = models[i]->id_.data();
+      shape_msgs::Mesh mesh;
+
+      std::cout << "Loading model: " << model_id;
+      if (!database->getScaledModelMesh(model_id, mesh)) {
+        std::cout << "  ... Failed" << std::endl;
+        continue;
+      }
+
+      object_recognizer_.addObject(model_id, mesh);
+      std::stringstream ss;
+      ss << model_id;
+      household_id_to_db_id_[model_id] = ss.str();
+      std::cout << std::endl;
+    }
+
+  }
+
   static void declare_params(ecto::tendrils& params) {
-    params.declare(
-        &ObjectRecognizer::object_ids_, "json_object_ids",
-        "The DB id of the objects to load in the household database.");
-    params.declare(
-        &ObjectRecognizer::tabletop_object_ids_, "tabletop_object_ids",
-        "The object_ids set as defined by the household object database.",
-        "REDUCED_MODEL_SET");
-    params.declare(&ObjectRecognizer::json_db_params_, "json_db",
-                   "The DB parameters").required(true);
+    object_recognition_core::db::bases::declare_params_impl(params, "mesh");
+    params.declare(&ObjectRecognizer::tabletop_object_ids_, "tabletop_object_ids",
+                   "The object_ids set as defined by the household object database.",
+                   "REDUCED_MODEL_SET");
   }
 
     static void
@@ -169,7 +272,9 @@ namespace tabletop
     void
     configure(const tendrils& params, const tendrils& inputs, const tendrils& outputs)
     {
-      tabletop_object_ids_.set_callback(boost::bind(&ObjectRecognizer::ParameterCallback, this, _1));
+      configure_impl();
+
+      tabletop_object_ids_.set_callback(boost::bind(&ObjectRecognizer::parameterCallbackModelSet, this, _1));
       tabletop_object_ids_.dirty(true);
 
       perform_fit_merge_ = true;
@@ -184,14 +289,13 @@ namespace tabletop
     int
     process(const tendrils& inputs, const tendrils& outputs)
     {
-      std::vector<tabletop_object_detector::TabletopObjectRecognizer<pcl::PointXYZ>::TabletopResult > results;
+      std::vector<tabletop_object_detector::TabletopObjectRecognizer::TabletopResult > results;
 
       // Process each table
-      pose_results_->clear();
-
-      std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> clusters_merged;
-      // Map to store the transformation for each cluster (table_index)
-      std::map<pcl::PointCloud<pcl::PointXYZ>::Ptr, size_t> cluster_table;
+      std::vector<std::vector<cv::Vec3f> > clusters_merged;
+      clusters_merged.reserve(100);
+      std::vector<size_t> cluster_table;
+      cluster_table.reserve(100);
 
       std::vector<cv::Vec3f> translations(clusters_->size());
       std::vector<cv::Matx33f> rotations(clusters_->size());
@@ -199,44 +303,39 @@ namespace tabletop
       {
         getPlaneTransform((*table_coefficients_)[table_index], rotations[table_index], translations[table_index]);
 
-        // Make the clusters be in the table frame
-        size_t n_clusters = (*clusters_)[table_index].size();
-        std::vector<pcl::PointCloud<pcl::PointXYZ>::Ptr> clusters(n_clusters);
-
         cv::Matx33f Rinv = rotations[table_index].t();
         cv::Vec3f Tinv = -Rinv*translations[table_index];
 
-        for (size_t cluster_index = 0; cluster_index < n_clusters; ++cluster_index)
-        {
-          clusters[cluster_index] = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>());
-          for(size_t i = 0; i < (*clusters_)[table_index][cluster_index].size(); ++i)
-          {
-            cv::Vec3f res = Rinv*(*clusters_)[table_index][cluster_index][i] + Tinv;
-            clusters[cluster_index]->push_back(pcl::PointXYZ(res[0], res[1], res[2]));
-          }
-          cluster_table.insert(std::pair<pcl::PointCloud<pcl::PointXYZ>::Ptr, size_t>(clusters[cluster_index], table_index));
+      BOOST_FOREACH(const std::vector<cv::Vec3f>& cluster, (*clusters_)[table_index]) {
+        clusters_merged.resize(clusters_merged.size() + 1);
+        for (size_t i = 0; i < cluster.size(); ++i) {
+          cv::Vec3f res = Rinv * cluster[i] + Tinv;
+          clusters_merged.back().push_back(cv::Vec3f(res[0], res[1], res[2]));
         }
-
-        clusters_merged.insert(clusters_merged.end(), clusters.begin(), clusters.end());
+        cluster_table.push_back(table_index);
       }
+    }
 
+      // Find possible candidates
       object_recognizer_.objectDetection(clusters_merged, confidence_cutoff_, perform_fit_merge_, results);
 
+      // Define the results
+      pose_results_->clear();
       for (size_t i = 0; i < results.size(); ++i)
       {
-        const tabletop_object_detector::TabletopObjectRecognizer<pcl::PointXYZ>::TabletopResult & result = results[i];
-        const size_t table_index = cluster_table[result.cloud_];
+        const tabletop_object_detector::TabletopObjectRecognizer::TabletopResult & result = results[i];
+        const size_t table_index = cluster_table[result.cloud_index_];
 
         PoseResult pose_result;
 
         // Add the object id
-        std::stringstream ss;
-        ss << result.object_id_;
-        pose_result.set_object_id(db_, ss.str());
+        std::string object_id = household_id_to_db_id_[result.object_id_];
+        pose_result.set_object_id(db_, object_id);
 
         // Add the pose
         const geometry_msgs::Pose &pose = result.pose_;
         cv::Vec3f T(pose.position.x, pose.position.y, pose.position.z);
+        T[2] -= min_z_[object_id];
         Eigen::Quaternionf quat(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
 
         cv::Vec3f new_T = rotations[table_index] * T + translations[table_index];
@@ -248,17 +347,20 @@ namespace tabletop
         pose_result.set_confidence(result.confidence_);
 
         // Add the cluster of points
-        std::vector<sensor_msgs::PointCloud2ConstPtr> ros_clouds (1);
-        sensor_msgs::PointCloud2Ptr cluster_cloud (new sensor_msgs::PointCloud2());
+        std::vector<sensor_msgs::PointCloud2Ptr> ros_clouds (1);
 
-#if PCL_VERSION_COMPARE(>=,1,7,0)
-        ::pcl::PCLPointCloud2 pcd_tmp;
-        ::pcl::toPCLPointCloud2(*result.cloud_, pcd_tmp);
-        pcl_conversions::fromPCL(pcd_tmp, *cluster_cloud);
-#else
-        pcl::toROSMsg(*result.cloud_, *cluster_cloud);
-#endif
-        ros_clouds[0] = cluster_cloud;
+        ros_clouds[0].reset(new sensor_msgs::PointCloud2());
+        sensor_msgs::PointCloud2Proxy<sensor_msgs::PointXYZ> proxy(*(ros_clouds[0]));
+
+      // Add the cloud
+      proxy.resize(result.cloud_.size());
+      sensor_msgs::PointXYZ *iter = &(proxy[0]);
+      for(size_t i = 0; i < result.cloud_.size(); ++i, ++iter) {
+        iter->x = result.cloud_[i][0];
+        iter->y = result.cloud_[i][1];
+        iter->z = result.cloud_[i][2];
+      }
+
         pose_result.set_clouds(ros_clouds);
 
         pose_results_->push_back(pose_result);
@@ -268,10 +370,8 @@ namespace tabletop
 
   private:
     typedef std::vector<tabletop_object_detector::ModelFitInfo> ModelFitInfos;
-    /** The db we are dealing with */
-    boost::shared_ptr<object_recognition_core::db::ObjectDb> db_;
     /** The object recognizer */
-    tabletop_object_detector::TabletopObjectRecognizer<pcl::PointXYZ> object_recognizer_;
+    tabletop_object_detector::TabletopObjectRecognizer object_recognizer_;
     /** The resulting poses of the objects */
     ecto::spore<std::vector<PoseResult> > pose_results_;
     /** The input clusters */
@@ -281,10 +381,12 @@ namespace tabletop
     /** The number of models to fit to each cluster */
     float confidence_cutoff_;
     bool perform_fit_merge_;
-    ecto::spore<std::string> object_ids_;
     ecto::spore<std::string> tabletop_object_ids_;
-    ecto::spore<std::string> json_db_params_;
-  };
+  /** map to convert from artificial household id to db id */
+  std::map<size_t, std::string> household_id_to_db_id_;
+  /** for each DB id, store the minimum z */
+  std::map<std::string, double> min_z_;
+};
 }
 
 ECTO_CELL(tabletop_object, tabletop::ObjectRecognizer, "ObjectRecognizer",
