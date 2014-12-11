@@ -1,0 +1,12 @@
+Source: ros-indigo-object-recognition-tabletop
+Section: misc
+Priority: extra
+Maintainer: Vincent Rabaud <vincent.rabaud@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), libassimp-dev, ros-indigo-catkin, ros-indigo-cmake-modules, ros-indigo-ecto, ros-indigo-moveit-core, ros-indigo-object-recognition-core, ros-indigo-object-recognition-msgs, ros-indigo-opencv-candidate, ros-indigo-pluginlib, ros-indigo-tf
+Homepage: http://ecto.willowgarage.com
+Standards-Version: 3.9.2
+
+Package: ros-indigo-object-recognition-tabletop
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libassimp-dev, ros-indigo-ecto, ros-indigo-moveit-core, ros-indigo-object-recognition-core, ros-indigo-object-recognition-msgs, ros-indigo-opencv-candidate, ros-indigo-pluginlib, ros-indigo-tf
+Description: A port of the old tabletop object recognition
