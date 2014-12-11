@@ -47,10 +47,6 @@
 #include <Eigen/Geometry>
 #include "point_cloud2_proxy.h"
 
-#include <tf/transform_listener.h>
-#include <tf/transform_broadcaster.h>
-
-#include <household_objects_database/objects_database.h>
 #include <tabletop/object/tabletop_object_detector.h>
 
 #include <opencv2/core/core.hpp>
@@ -58,8 +54,9 @@
 #include <object_recognition_core/common/pose_result.h>
 #include <object_recognition_core/common/types.h>
 #include <object_recognition_core/db/ModelReader.h>
+#include <object_recognition_core/db/db.h>
 
-#include <object_recognition_tabletop/household.h>
+#include <pluginlib/class_loader.h>
 
 #include <assimp/cimport.h>
 #include <assimp/scene.h>
@@ -106,32 +103,36 @@ struct ObjectRecognizer : public object_recognition_core::db::bases::ModelReader
     aiLogStream* ai_stream_ = new aiLogStream(aiGetPredefinedLogStream(aiDefaultLogStream_STDOUT, NULL));
     aiAttachLogStream(ai_stream_);
 
+    int template_db_id = 0;
     BOOST_FOREACH(const object_recognition_core::db::Document & document, db_documents) {
       // Get the list of _attachments and figure out the original mesh
       std::vector<std::string> attachments_names = document.attachment_names();
       std::string mesh_path;
-      BOOST_FOREACH(const std::string & attachment_name, attachments_names) {
-        if (attachment_name.find("original") != 0)
-          continue;
-        // Create a temporary file
-        char mesh_path_tmp[L_tmpnam];
-        tmpnam(mesh_path_tmp);
-        mesh_path = std::string(mesh_path_tmp) + attachment_name.substr(8);
+      std::vector<std::string> possible_names(2);
+      possible_names[0] = "original";
+      possible_names[1] = "mesh";
+      for (size_t i = 0; i < 2 && mesh_path.empty(); ++i) {
+        BOOST_FOREACH(const std::string & attachment_name, attachments_names) {
+          if (attachment_name.find(possible_names[i]) != 0)
+            continue;
+          // Create a temporary file
+          char mesh_path_tmp[L_tmpnam];
+          tmpnam(mesh_path_tmp);
+          mesh_path = std::string(mesh_path_tmp) + attachment_name.substr(possible_names[i].size());
 
-        // Load the mesh and save it to the temporary file
-        std::ofstream mesh_file;
-        mesh_file.open(mesh_path.c_str());
-        document.get_attachment_stream(attachment_name, mesh_file);
-        mesh_file.close();
-        break;
+          // Load the mesh and save it to the temporary file
+          std::ofstream mesh_file;
+          mesh_file.open(mesh_path.c_str());
+          document.get_attachment_stream(attachment_name, mesh_file);
+          mesh_file.close();
+          break;
+        }
       }
 
-      // Create a fake ID
-      static int i = 0;
-      household_id_to_db_id_[i] = document.get_field<std::string>("object_id");
+      household_id_to_db_id_[template_db_id] = document.get_field<std::string>("object_id");
 
       // Load the mesh through assimp
-      std::cout << "Loading model: " << document.id() << " for object id: " << household_id_to_db_id_[i];
+      std::cout << "Loading model: " << document.id() << " for object id: " << household_id_to_db_id_[template_db_id];
 
       const struct aiScene* scene = aiImportFile(mesh_path.c_str(), aiProcess_FindDegenerates |
       aiProcess_FindInvalidData |
@@ -169,9 +170,11 @@ struct ObjectRecognizer : public object_recognition_core::db::bases::ModelReader
         size_t j_triangles = size_ini_triangles;
         for (size_t j = 0; j < mesh->mNumFaces; ++j) {
           const aiFace& face = mesh->mFaces[j];
-          for (size_t k = 0; k < 3; ++k)
-            mesh_msg.triangles[j_triangles].vertex_indices[k] = size_ini + face.mIndices[k];
-          ++j_triangles;
+          if (face.mNumIndices == 3) {
+            for (size_t k = 0; k < 3; ++k)
+              mesh_msg.triangles[j_triangles].vertex_indices[k] = size_ini + face.mIndices[k];
+            ++j_triangles;
+          }
         }
         mesh_msg.triangles.resize(j_triangles);
       }
@@ -180,13 +183,12 @@ struct ObjectRecognizer : public object_recognition_core::db::bases::ModelReader
       for (size_t i = 0; i < mesh_msg.vertices.size(); ++i)
         mesh_msg.vertices[i].z -= min_z;
 
-      min_z_[document.get_field<std::string>("object_id")] = min_z;
-
-      object_recognizer_.addObject(i, mesh_msg);
+      object_recognizer_.addObject(template_db_id, mesh_msg);
 
       std::cout << std::endl;
 
       aiReleaseImport(scene);
+      template_db_id++;
     }
 
     aiDetachAllLogStreams();
@@ -202,55 +204,15 @@ struct ObjectRecognizer : public object_recognition_core::db::bases::ModelReader
 
     if (parameters.type() == object_recognition_core::db::ObjectDbParameters::NONCORE) {
       // If we are dealing with a household DB
-      db_.reset(new ObjectDbSqlHousehold());
+      pluginlib::ClassLoader<object_recognition_core::db::ObjectDb> db_loader("object_recognition_tabletop_household", "object_recognition_core::db::ObjectDb");
+      db_ = db_loader.createInstance("ObjectDbSqlHousehold");
       db_->set_parameters(parameters);
     } else {
       // If we are dealing with an ORK DB
       if (!db_)
-        db_ = ObjectDbParameters(*json_db_).generateDb();
+        db_ = object_recognition_core::db::ObjectDbParameters(*json_db_).generateDb();
       parameterCallbackCommon();
     }
-  }
-
-  void
-  parameterCallbackModelSet(const std::string& model_set) {
-    //std::vector<object_recognition_core::db::ModelId> object_ids;
-
-    //boost::python::stl_input_iterator<std::string> begin(python_object_ids), end;
-    //std::copy(begin, end, std::back_inserter(object_ids));
-
-    object_recognition_core::db::ObjectDbParameters parameters(*json_db_);
-
-    if (parameters.type() != object_recognition_core::db::ObjectDbParameters::NONCORE)
-      return;
-
-    object_recognizer_ = tabletop_object_detector::TabletopObjectRecognizer();
-
-    boost::shared_ptr<household_objects_database::ObjectsDatabase> database = dynamic_cast<ObjectDbSqlHousehold*>(&(*db_))->db();
-
-    std::vector<boost::shared_ptr<household_objects_database::DatabaseScaledModel> > models;
-    std::cout << "Loading model set: " << model_set << std::endl;
-    if (!database->getScaledModelsBySet(models, model_set))
-      return;
-
-    object_recognizer_.clearObjects();
-    for (size_t i = 0; i < models.size(); i++) {
-      int model_id = models[i]->id_.data();
-      shape_msgs::Mesh mesh;
-
-      std::cout << "Loading model: " << model_id;
-      if (!database->getScaledModelMesh(model_id, mesh)) {
-        std::cout << "  ... Failed" << std::endl;
-        continue;
-      }
-
-      object_recognizer_.addObject(model_id, mesh);
-      std::stringstream ss;
-      ss << model_id;
-      household_id_to_db_id_[model_id] = ss.str();
-      std::cout << std::endl;
-    }
-
   }
 
   static void declare_params(ecto::tendrils& params) {
@@ -273,9 +235,6 @@ struct ObjectRecognizer : public object_recognition_core::db::bases::ModelReader
     configure(const tendrils& params, const tendrils& inputs, const tendrils& outputs)
     {
       configure_impl();
-
-      tabletop_object_ids_.set_callback(boost::bind(&ObjectRecognizer::parameterCallbackModelSet, this, _1));
-      tabletop_object_ids_.dirty(true);
 
       perform_fit_merge_ = true;
       confidence_cutoff_ = 0.85f;
@@ -335,7 +294,7 @@ struct ObjectRecognizer : public object_recognition_core::db::bases::ModelReader
         // Add the pose
         const geometry_msgs::Pose &pose = result.pose_;
         cv::Vec3f T(pose.position.x, pose.position.y, pose.position.z);
-        T[2] -= min_z_[object_id];
+
         Eigen::Quaternionf quat(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
 
         cv::Vec3f new_T = rotations[table_index] * T + translations[table_index];
@@ -352,13 +311,17 @@ struct ObjectRecognizer : public object_recognition_core::db::bases::ModelReader
         ros_clouds[0].reset(new sensor_msgs::PointCloud2());
         sensor_msgs::PointCloud2Proxy<sensor_msgs::PointXYZ> proxy(*(ros_clouds[0]));
 
+      cv::Matx33f Rot = rotations[table_index];
+      cv::Vec3f Tra = translations[table_index];
       // Add the cloud
       proxy.resize(result.cloud_.size());
       sensor_msgs::PointXYZ *iter = &(proxy[0]);
       for(size_t i = 0; i < result.cloud_.size(); ++i, ++iter) {
-        iter->x = result.cloud_[i][0];
-        iter->y = result.cloud_[i][1];
-        iter->z = result.cloud_[i][2];
+        //Transform the object points back to their original frame
+        cv::Vec3f res = Rot * result.cloud_[i] + Tra;
+        iter->x = res[0];
+        iter->y = res[1];
+        iter->z = res[2];
       }
 
         pose_result.set_clouds(ros_clouds);
@@ -384,8 +347,6 @@ struct ObjectRecognizer : public object_recognition_core::db::bases::ModelReader
     ecto::spore<std::string> tabletop_object_ids_;
   /** map to convert from artificial household id to db id */
   std::map<size_t, std::string> household_id_to_db_id_;
-  /** for each DB id, store the minimum z */
-  std::map<std::string, double> min_z_;
 };
 }
 
